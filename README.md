@@ -9,10 +9,10 @@ This project simulates and analyzes the results of a randomized field experiment
 The goal is to assess whether different ad strategies can influence participants' decisions to take the COVID-19 vaccine. Participants were randomly assigned into three groups and surveyed at baseline and endline.
 
 **Total Participants:** 5,000\
-**Treatment Assignment:**\
-- Reason Group (1/3)\
-- Emotion Group (1/3)\
-- Control Group (1/3)
+**Treatment Assignment:**
+-   Reason Group (1/3)
+-   Emotion Group (1/3)
+-   Control Group (1/3)
 
 **Endline Participation:** 4,500 participants (10% dropout)
 
