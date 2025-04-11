@@ -1,0 +1,10 @@
+ad_group,gender,uptake_proportion
+Control,Female,52
+Control,Male,50.5
+Control,Non-binary,52.5
+Emotion,Female,72.6
+Emotion,Male,71.6
+Emotion,Non-binary,77.6
+Reason,Female,66.5
+Reason,Male,66.4
+Reason,Non-binary,63.9

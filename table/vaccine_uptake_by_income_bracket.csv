@@ -1,0 +1,13 @@
+income_bracket,ad_group,uptake_rate
+100k+,Control,51.3
+100k+,Emotion,74.2
+100k+,Reason,69.7
+30k–60k,Control,51.5
+30k–60k,Emotion,71.2
+30k–60k,Reason,67.3
+60k–100k,Control,52.9
+60k–100k,Emotion,72.5
+60k–100k,Reason,64.4
+<30k,Control,50.3
+<30k,Emotion,72
+<30k,Reason,64.9

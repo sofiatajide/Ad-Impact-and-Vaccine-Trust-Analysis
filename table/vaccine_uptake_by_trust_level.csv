@@ -1,0 +1,10 @@
+ad_group,trust_level,uptake_rate
+Control,High,57.2
+Control,Low,49.4
+Control,Medium,51.4
+Emotion,High,80.2
+Emotion,Low,68.2
+Emotion,Medium,73.7
+Reason,High,67.4
+Reason,Low,64.4
+Reason,Medium,67.4

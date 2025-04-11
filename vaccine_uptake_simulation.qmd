@@ -1,0 +1,529 @@
+---
+title: "Analyzing the Impact of Ad Strategies"
+format: html
+editor: visual
+---
+
+## Running Code
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Install and Load Library
+
+```{r}
+# Install these packages if needed
+#install.packages(c("tidyverse", "janitor", "broom", "ggplot2", "kableExtra", "knitr", "tidyr"))
+
+library(tidyverse)
+library(janitor)
+library(broom)
+library(ggplot2)
+library(kableExtra)
+library(knitr)
+library(tidyr)
+```
+
+#### Simulate Baseline Data
+
+```{r}
+set.seed(2025)
+
+n <- 5000
+countries <- c("USA", "Canada", "UK", "Nigeria", "India", "Brazil", "Other")
+
+# Define age group weights based on Facebook demographics
+age_groups <- c("18-24", "25-34", "35-44", "45-54", "55-64", "65+")
+weights <- c(22.1, 30.8, 20.4, 12.3, 8.0, 6.4) # Corresponding percentages for age groups
+
+# Sample age groups based on weights
+group_sample <- sample(age_groups, n, replace = TRUE, prob = weights / sum(weights))
+
+# Generate ages within each age group
+age <- sapply(group_sample, function(group) {
+  if (group == "18-24") round(runif(1, 18, 24))
+  else if (group == "25-34") round(runif(1, 25, 34))
+  else if (group == "35-44") round(runif(1, 35, 44))
+  else if (group == "45-54") round(runif(1, 45, 54))
+  else if (group == "55-64") round(runif(1, 55, 64))
+  else round(runif(1, 65, 80))
+})
+
+# Create the baseline dataset
+baseline <- tibble(
+  id = 1:n,
+  age = age,
+  gender = sample(c("Male", "Female", "Non-binary"), n, replace = TRUE, prob = c(0.47, 0.49, 0.04)),
+  education_level = sample(c("High school", "Bachelor's", "Master's", "Doctorate"), n, replace = TRUE, prob = c(0.3, 0.35, 0.3, 0.05)),
+  income_bracket = sample(c("<30k", "30k–60k", "60k–100k", "100k+"), n, replace = TRUE, prob = c(0.35, 0.25, 0.2, 0.2)),
+  urbanicity = sample(c("Urban", "Suburban", "Rural"), n, replace = TRUE, prob = c(0.5, 0.3, 0.2)),
+  country = sample(countries, n, replace = TRUE, prob = c(0.25, 0.05, 0.10, 0.15, 0.25, 0.15, 0.05)),
+  trust_vaccine = round(runif(n, 1, 5)),  # Likert scale (1: low trust, 5: high trust)
+  concern_side_effects = round(runif(n, 1, 5)) # Likert scale (1: low concern, 5: high concern)
+)
+```
+
+#### Random Assignment to Ad Groups
+
+```{r}
+treatment <- tibble(
+  id = sample(1:n),
+  ad_group = rep(c("Reason", "Emotion", "Control"), length.out = n)
+)
+```
+
+#### Simulate Endline Data (Post-Ad)
+
+```{r}
+# Create IDs for participants who completed the endline survey (10% dropout)
+endline_ids <- sample(baseline$id, 4500) # Adjusting column reference to match the baseline dataset
+
+# Simulate the endline dataset 
+endline <- baseline %>%
+  left_join(treatment, by = "id") %>% 
+  filter(id %in% endline_ids) %>%      # Filter for endline participants
+  mutate(
+    base_prob = 0.5 + 0.1 * (trust_vaccine > 3) - 0.05 * (concern_side_effects > 3),
+    ad_effect = case_when(
+      ad_group == "Reason" ~ 0.15,
+      ad_group == "Emotion" ~ 0.20,
+      TRUE ~ 0.00
+    ),
+    country_effect = case_when(
+      country %in% c("Nigeria", "India", "Brazil") ~ -0.02,
+      TRUE ~ 0
+    ),
+    final_prob = pmin(pmax(base_prob + ad_effect + country_effect, 0.1), 0.9), # Bound probabilities
+    vaccine_uptake = ifelse(rbinom(n(), size = 1, prob = final_prob) == 1, "Yes", "No"), # Convert uptake to Yes/No
+    recall_ad = ifelse(ad_group == "Control", "No", sample(c("Yes", "No"), n(), replace = TRUE)),
+    post_trust_vaccine = sample(1:5, n(), replace = TRUE),
+    post_concern_side_effects = sample(1:5, n(), replace = TRUE)
+  ) %>%
+  select(id, recall_ad, post_trust_vaccine, post_concern_side_effects, vaccine_uptake) 
+```
+
+#### Merge and Clean the Datasets
+
+```{r}
+# Merge the Datasets
+final_dataset <- baseline %>%
+  left_join(treatment, by = "id") %>%
+  left_join(endline, by = "id")
+
+# Clean Dataset
+
+# Convert vaccine_uptake to binary (0/1)
+final_dataset$vaccine_uptake_status <- ifelse(final_dataset$vaccine_uptake == "Yes", 1, 0)
+
+final_dataset$vaccine_uptake <- ifelse(is.na(final_dataset$vaccine_uptake), "No Response", final_dataset$vaccine_uptake)
+
+# Clean Dataset
+cleaned_dataset <- final_dataset %>%
+  filter(if_all(where(is.numeric), ~ !is.na(.) & is.finite(.)))
+```
+
+#### Save Dataset
+
+```{r}
+dir.create("data")
+write_csv(baseline, "data/baseline_survey.csv")
+write_csv(treatment, "data/treatment_assignment.csv")
+write_csv(endline, "data/endline_survey.csv")
+write_csv(final_dataset, "data/final_dataset.csv")
+write_csv(cleaned_dataset, "data/cleaned_dataset.csv")
+```
+
+#### Demographics Summary
+
+```{r}
+# Demographics by Ad Group
+demographics_summary <- final_dataset %>%
+  group_by(ad_group) %>%
+  summarise(
+    Mean_Age = round(mean(age), 1),
+    Female = round(mean(gender == "Female") * 100, 1),
+    Male = round(mean(gender == "Male") * 100, 1),
+    College_Grad = round(mean(education_level %in% c("Doctorate", "Master's", "Bachelor's")) * 100, 1),
+    High_Income = round(mean(income_bracket == "100k+") * 100, 1),
+    Low_Income = round(mean(income_bracket == "<30k") * 100, 1)
+  )
+
+kable(demographics_summary, caption = "Table 1: Demographics by Ad Group") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+```{r}
+# Demographics by Country
+country_distribution <- final_dataset %>%
+  group_by(country) %>%
+  summarise(
+    Count = n()
+  ) %>%
+  mutate(Percentage = round(Count / sum(Count) * 100, 1))
+
+kable(country_distribution, caption = "Table 2: Country Distribution") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+## Analysis and Visualization
+
+### Tables
+
+#### Logistic Regression
+
+```{r}
+# Logistic regression
+model <- glm(
+  vaccine_uptake_status ~ ad_group + gender + education_level + income_bracket + urbanicity + country + age,
+  data = final_dataset,
+  family = "binomial"
+)
+summary(model)
+```
+
+#### Summary Statistics for Trust and Side Effect Concerns
+
+```{r}
+# Summary statistics for trust in vaccine and concern about side effects
+summary_trust_concern <- final_dataset %>%
+  summarise(
+    avg_trust = mean(trust_vaccine),
+    sd_trust = sd(trust_vaccine),
+    avg_concern = mean(concern_side_effects),
+    sd_concern = sd(concern_side_effects)
+  )
+
+kable(summary_trust_concern, caption = "Table 3: Summary Statistics for Trust in Vaccine and Concern about Side Effects") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+#### Vaccine Uptake Distribution by Ad Group
+
+```{r}
+# Summary table
+vaccine_uptake_distribution_by_ad_group <- cleaned_dataset %>%
+  tabyl(ad_group, vaccine_uptake) %>%
+  adorn_percentages("row") %>%
+  adorn_pct_formatting() %>%
+  adorn_ns()
+
+kable(vaccine_uptake_distribution_by_ad_group, caption = "Table 4: Vaccine Uptake Distribution by Ad Group") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+#### Vaccine Uptake by Education Level
+
+```{r}
+# Vaccine Uptake by Education Level
+vaccine_uptake_by_education_level <- cleaned_dataset %>%
+  group_by(education_level) %>%
+  summarize(
+    uptake_rate = round(mean(vaccine_uptake_status, na.rm = TRUE) * 100, 1),
+    .groups = 'drop'
+  )
+
+kable(vaccine_uptake_by_education_level, caption = "Table 5: Vaccine Uptake by Education Level") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+#### Vaccine Uptake by Country and Treatment Group
+
+```{r}
+# Vaccine Uptake Rate by Country and Treatment Group (Ad Strategy)
+vaccine_uptake_by_country_and_ad_group <- cleaned_dataset %>%
+  group_by(country, ad_group) %>%
+  summarize(
+    uptake_rate = round(mean(vaccine_uptake_status, na.rm = TRUE) * 100, 1),
+    .groups = 'drop'
+  ) %>%
+  pivot_wider(names_from = ad_group, values_from = uptake_rate)
+
+kable(vaccine_uptake_by_country_and_ad_group, caption = "Table 6: Vaccine Uptake Rate by Country and Ad Group") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+#### Vaccine Uptake by Ad Group and Trust Level
+
+```{r}
+# Summary table showing vaccine uptake by ad group and trust level (Low, Medium, High trust)
+vaccine_uptake_by_trust_level <- cleaned_dataset %>%
+  mutate(trust_level = case_when(
+    trust_vaccine <= 2 ~ "Low",
+    trust_vaccine <= 4 ~ "Medium",
+    TRUE ~ "High"
+  )) %>%
+  group_by(ad_group, trust_level) %>%
+  summarize(
+    uptake_rate = round(mean(vaccine_uptake_status, na.rm = TRUE) * 100, 1),
+    .groups = 'drop'
+  )
+
+
+kable(vaccine_uptake_by_trust_level, caption = "Table 7: Vaccine Uptake by Ad Group and Trust Level") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+#### Vaccine Uptake by Income Bracket and Ad Group
+
+```{r}
+# Summary table showing vaccine uptake rate by income bracket and ad group
+vaccine_uptake_by_income_bracket <- cleaned_dataset %>%
+  group_by(income_bracket, ad_group) %>%
+  summarize(
+    uptake_rate = round(mean(vaccine_uptake_status, na.rm = TRUE) * 100, 1),
+    .groups = 'drop'
+  )
+
+kable(vaccine_uptake_by_income_bracket, caption = "Table 8: Vaccine Uptake Rate by Income Bracket and Ad Group") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+#### Proportions of Vaccine Uptake by Ad Group and Gender
+
+```{r}
+# Table showing proportions of vaccine uptake by ad group and gender
+vaccine_uptake_by_ad_group_gender <- cleaned_dataset %>%
+  group_by(ad_group, gender) %>%
+  summarize(
+    uptake_proportion = round(mean(vaccine_uptake_status, na.rm = TRUE) * 100, 1), 
+    .groups = 'drop'
+  )
+
+kable(vaccine_uptake_by_ad_group_gender, caption = "Table 9: Proportions of Vaccine Uptake by Ad Group and Gender") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+#### Side Effect Concerns by Age Group
+
+```{r}
+# Table showing concern about side effects by age group
+concern_by_age_group <- final_dataset %>%
+  mutate(age_group = cut(age, breaks = c(18, 25, 35, 45, 55, 65, Inf), labels = c("18-24", "25-34", "35-44", "45-54", "55-64", "65+"), right = FALSE)) %>%
+  group_by(age_group) %>%
+  summarize(
+    avg_concern = round(mean(concern_side_effects, na.rm = TRUE), 2),
+    .groups = 'drop'
+  )
+
+kable(concern_by_age_group, caption = "Table 10: Concern About Side Effects by Age Group") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+#### Side Effect Concerns by Country
+
+```{r}
+# Table showing concern about side effects by country
+concern_by_country <- final_dataset %>%
+  group_by(country) %>%
+  summarize(
+    avg_concern = round(mean(concern_side_effects, na.rm = TRUE), 2), 
+    .groups = 'drop'
+  )
+
+kable(concern_by_country, caption = "Table 11: Concern About Side Effects by Country") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+#### Trust in Vaccine by Ad Group and Country
+
+```{r}
+# Summary table for trust in vaccine by ad group and country
+trust_by_ad_group_and_country <- final_dataset %>%
+  group_by(ad_group, country) %>%
+  summarize(
+    avg_trust = round(mean(trust_vaccine, na.rm = TRUE), 2), 
+    .groups = 'drop'
+  )
+
+kable(trust_by_ad_group_and_country, caption = "Table 12: Trust in Vaccine by Ad Group and Country") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+#### Export Tables to CSV Files
+
+```{r}
+dir.create("table")
+write_csv(demographics_summary, "table/demographics_summary.csv")
+write_csv(country_distribution, "table/country_distribution.csv")
+write_csv(vaccine_uptake_distribution_by_ad_group, "table/vaccine_uptake_distribution_by_ad_group.csv")
+write_csv(summary_trust_concern, "table/summary_trust_concern.csv")
+write_csv(vaccine_uptake_by_education_level, "table/vaccine_uptake_by_education_level.csv")
+write_csv(vaccine_uptake_by_country_and_ad_group, "table/vaccine_uptake_by_country_and_ad_group.csv")
+write_csv(vaccine_uptake_by_trust_level, "table/vaccine_uptake_by_trust_level.csv")
+write_csv(vaccine_uptake_by_income_bracket, "table/vaccine_uptake_by_income_bracket.csv")
+write_csv(vaccine_uptake_by_ad_group_gender, "table/vaccine_uptake_by_ad_group_gender.csv")
+write_csv(concern_by_age_group, "table/concern_by_age_group.csv")
+write_csv(concern_by_country, "table/concern_by_country.csv")
+write_csv(trust_by_ad_group_and_country, "table/trust_by_ad_group_and_country.csv")
+```
+
+### Plots
+
+#### Marginal Effects Plot
+
+```{r}
+# Effect of Ad Group on Vaccine Uptake
+plot_data <- tidy(model, exponentiate = TRUE, conf.int = TRUE) %>%
+  filter(str_detect(term, "ad_group")) %>%
+  add_row(term = "ad_groupControl", estimate = 1, conf.low = 1, conf.high = 1)
+
+ad_group_effect_plot <- ggplot(plot_data, aes(x = term, y = estimate, ymin = conf.low, ymax = conf.high)) +
+  geom_pointrange() +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  labs(
+    title = "Effect of Ad Group on Vaccine Uptake (Odds Ratio)",
+    x = "Ad Group",
+    y = "Odds Ratio"
+  ) +
+  theme_minimal()
+
+print(ad_group_effect_plot)
+```
+
+#### Vaccine Uptake by Ad Group and Country
+
+```{r}
+vaccine_uptake_plot <- ggplot(cleaned_dataset, aes(x = ad_group, fill = factor(vaccine_uptake))) +
+  geom_bar(position = "fill") +
+  facet_wrap(~ country) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Vaccine Uptake by Ad Group and Country",
+    y = "Proportion",
+    fill = "Vaccine Uptake"
+  ) +
+  theme_minimal()
+
+print(vaccine_uptake_plot)
+```
+
+#### Vaccine Uptake by Age Group
+
+```{r}
+vaccine_uptake_age_group_plot <- cleaned_dataset %>%
+  mutate(age_group = cut(
+    age,
+    breaks = c(18, 25, 35, 45, 55, 65, Inf),
+    labels = c("18-24", "25-34", "35-44", "45-54", "55-64", "65+"),
+    right = FALSE
+  )) %>%
+  ggplot(aes(x = age_group, fill = factor(vaccine_uptake))) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Vaccine Uptake by Age Group",
+    x = "Age Group",
+    y = "Proportion",
+    fill = "Uptake"
+  ) +
+  theme_minimal()
+
+print(vaccine_uptake_age_group_plot)
+
+```
+
+#### Trust in Vaccine by Ad Group
+
+```{r}
+# Create the plot and name it `trust_distribution_plot`
+trust_distribution_plot <- ggplot(final_dataset, aes(x = trust_vaccine, fill = ad_group)) +
+  geom_histogram(binwidth = 1, position = "dodge") +
+  labs(
+    title = "Distribution of Trust in Vaccine by Ad Group",
+    x = "Trust in Vaccine (1-5)",
+    y = "Count"
+  ) +
+  theme_minimal()
+
+print(trust_distribution_plot)
+```
+
+#### Change in Trust in Vaccine
+
+```{r}
+# Create the long dataset for visualization
+long_dataset <- cleaned_dataset %>%
+  pivot_longer(cols = c(trust_vaccine, post_trust_vaccine), 
+               names_to = "time_period", values_to = "value")
+
+# Create the plot
+trust_change_plot <- ggplot(long_dataset, aes(x = time_period, y = value, group = id)) +
+  geom_line(aes(color = ad_group), alpha = 0.5) +
+  stat_summary(fun = mean, geom = "line", aes(group = ad_group), color = "black", size = 1.5) +
+  labs(
+    title = "Change in Trust in Vaccine Before and After Ad Exposure",
+    x = "Time Period",
+    y = "Trust in Vaccine (1-5)"
+  ) +
+  theme_minimal()
+
+print(trust_change_plot)
+```
+
+#### Change in Trust in Vaccine Density Plot
+
+```{r}
+trust_density_plot <- ggplot(cleaned_dataset, aes(x = trust_vaccine, fill = "Before")) +
+  geom_density(alpha = 0.4, color = NA) +
+  geom_density(aes(x = post_trust_vaccine, fill = "After"), alpha = 0.4, color = NA) +
+  facet_wrap(~ ad_group) +
+  labs(
+    title = "Distribution of Trust in Vaccine Before and After Ad Exposure",
+    x = "Trust in Vaccine (1-5)",
+    y = "Density"
+  ) +
+  theme_minimal()
+
+print(trust_density_plot)
+```
+
+#### Country-wise Vaccine Uptake Rates
+
+```{r}
+vaccine_uptake_country_plot <- cleaned_dataset %>%
+  group_by(country) %>%
+  summarize(uptake_rate = mean(vaccine_uptake_status, na.rm = TRUE)) %>%
+  ggplot(aes(x = reorder(country, uptake_rate), y = uptake_rate)) +
+  geom_col(fill = "steelblue") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Vaccine Uptake Rate by Country",
+    x = "Country",
+    y = "Uptake Rate"
+  ) +
+  coord_flip() +
+  theme_minimal()
+
+print(vaccine_uptake_country_plot)
+```
+
+#### Concern About Side Effects by Country
+
+```{r}
+concern_side_effects_plot <- ggplot(final_dataset, aes(x = concern_side_effects, fill = country)) +
+  geom_density(alpha = 0.4) +
+  labs(
+    title = "Concern About Side Effects by Country",
+    x = "Concern Level (1-5)",
+    y = "Density"
+  ) +
+  theme_minimal()
+
+print(concern_side_effects_plot)
+
+```
+
+#### Save Plots
+
+```{r}
+dir.create("plots")
+ggsave("plots/ad_group_effect_plot.png", plot = ad_group_effect_plot, width = 8, height = 6)
+ggsave("plots/vaccine_uptake_plot.png", plot = vaccine_uptake_plot, width = 8, height = 6)
+ggsave("plots/vaccine_uptake_age_group_plot.png", plot = vaccine_uptake_age_group_plot, width = 8, height = 6)
+ggsave("plots/trust_distribution_plot.png", plot = trust_distribution_plot, width = 8, height = 6)
+ggsave("plots/trust_change_plot.png", plot = trust_change_plot, width = 8, height = 6)
+ggsave("plots/trust_density_plot.png", plot = trust_density_plot, width = 8, height = 6)
+ggsave("plots/vaccine_uptake_country_plot.png", plot = vaccine_uptake_country_plot, width = 8, height = 6)
+ggsave("plots/concern_side_effects_plot.png", plot = concern_side_effects_plot, width = 8, height = 6)
+```
